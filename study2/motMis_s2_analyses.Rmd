@@ -1,0 +1,561 @@
+---
+title: "motMis - study 2"
+output: html_document
+---
+```{r install/load packages,include=FALSE}
+
+#Checks if required packages are installed. Installs them if not.
+  # list_pckgs <- c("tidyverse", "psych","lsr","mblm","broom", "effsize","matrixStats","devtools","yarrr","lmtest","lubridate","rstudioapi","apaTables","broman") # list of required packages
+  # new_pckgs <- list_pckgs[!(list_pckgs %in% installed.packages()[,"Package"])] # list of required packages that are not install on this machine
+  # if(length(new_pckgs)) install.packages(new_pckgs) # installs them
+  
+#Load libraries
+  library("tidyverse") # plotting, manipulating data etc
+  library("psych") # for trait measures
+  library("lsr") # for computing effect sizes
+  library("mblm") #non-parametric linear regression
+  library("broom") # clean outputs
+  library("effsize") #non-parametric effect sizes
+  library("matrixStats") #calculation SDs for multiple cols
+  library("R.matlab") #library to import data from .mat (where it was originally analyzed)
+  library("devtools") #pirateplots
+  library("yarrr")#pirateplots
+  library("lmtest")
+  library("rstudioapi") # load rstudio api
+  library("apaTables") # for regression tables
+  library("broman") # flexibly display p-values with Rmd function
+  library("MBESS") # CIs on Rsquared in tables
+
+#Set working directory to the location of this R file (data should also be saved here)
+  # curr_dir <- getActiveDocumentContext()$path # get path to currently open R file
+  # setwd(dirname(curr_dir)) # set the working directory to curr_dirr
+  # #print(getwd()) # print directory
+  # rm("curr_dir","new_pckgs","list_pckgs")
+
+ 
+```
+
+```{r non-parametric stats functions,include=FALSE}
+
+#wilcoxon test - paired
+  w.test = function(x,y){
+  t = wilcox.test(x,y, paired=TRUE) #optional: non-parametric CIs with conf.in=TRUE
+    d = cliff.delta(x,y) 
+    da = cohen.d(x,y)
+      tbl = tidy(t) 
+      tbl$method <- tbl$alternative <- tbl$estimate <- NULL #remove strings
+      tbl$cohen.d = da$estimate #add parametric ES
+      tbl$cliff.d = d$estimate #add non-parametric ES
+      #tbl <- sapply( tbl, as.numeric ) #convert to numeric
+        print(tbl) 
+  }
+
+#wilcoxon test - one-sample
+  w.test_0 = function(x){
+  t = wilcox.test(x,mu=0,conf.in=TRUE) #optional: non-parametric CIs with conf.in=TRUE
+    d = cliff.delta(x,0) 
+    da = cohensD(x,mu=0)
+      tbl = tidy(t) 
+      tbl$method <- tbl$alternative <- tbl$estimate <- NULL #remove strings
+      tbl$cohen.d = da #add parametric ES
+      tbl$cliff.d = d$estimate #add non-parametric ES
+      #tbl <- sapply( tbl, as.numeric ) #convert to numeric
+        print(tbl) 
+  }
+
+#mann-whitney test 
+  mw.test = function(x,y){
+  t = wilcox.test(x~y) #optional: non-parametric CIs with conf.in=TRUE
+    d = cliff.delta(x~y) 
+    da = cohen.d(x~y)
+      tbl = tidy(t) 
+      tbl$method <- tbl$alternative <- tbl$estimate <- NULL #remove strings
+      tbl$cohen.d = abs(da$estimate) #add parametric ES
+      tbl$cliff.d = abs(d$estimate) #add non-parametric ES
+      #tbl <- sapply( tbl, as.numeric ) #convert to numeric
+        print(tbl) 
+  }
+  
+```
+
+```{r read in data set, include=FALSE}
+
+#read data
+  df2 = read.csv("motMis_s2_data.csv") # note: UZH ethics prohibits releasing this dataset, and thus it is not publicly available (for testing, please use the analysis script and data for Experiment 3)
+
+#gender and age
+  describe(df2$Age)$mean
+  table(df2$gender)
+
+```
+
+```{r compute variables, include=FALSE}
+
+#compute the true average % transferred
+  df2 <- df2 %>% mutate(DGAverage=(DG1+DG2+DG3+DG4+DG5)/5) 
+    df2$DGAverage = as.numeric(df2$DGAverage)
+    
+#compute the % difference between recalled transfer vs. actual transfer
+  df2$GuessVsAve = (df2$Guess - df2$DGAverage)
+
+#compute absolute % difference between recalled vs. actual transfer
+  df2$GuessVsAveA = abs(df2$GuessVsAve)
+  
+#compute standard deviation for the five transfer decisions for each subject
+  df2_sd <- c('DG1', 'DG2', 'DG3', 'DG4', 'DG5')
+    df2 <- df2 %>% mutate(DG.stdev=rowSds(as.matrix(.[df2_sd])))
+    
+#compute difference score between fairness vs actual transfer 
+  df2$FairVsActual = (df2$FairOffer - df2$DGAverage)
+  
+rm("df2_sd")
+ 
+```
+
+```{r exclusions, echo=FALSE}
+ 
+  #1 Outliers on our key measure: GuessVsAve
+
+  #ggplot(df2, aes("",GuessVsAve))+geom_boxplot()+theme_bw() #before
+    stats = psych::describe(df2$GuessVsAve) #exclude extreme outliers (4 SDs from the mean).
+    high_cutoff = stats$mean + (stats$sd*4)
+    low_cutoff = stats$mean - (stats$sd*4)
+    #SD outliers for memory errors
+    df2 <- subset(df2, GuessVsAve < high_cutoff)
+    df2 <- subset(df2, GuessVsAve > low_cutoff)
+  #ggplot(df2, aes("",GuessVsAve))+geom_boxplot()+theme_bw() #after
+
+  #2 to exclude people who had experience playing dictator games that were accidentally included in the study
+    df2 <- subset(df2, df2[ ,'MemExclude'] == 0)
+
+  rm("stats","high_cutoff","low_cutoff")
+
+#SUPPLEMENTAL EXCLUSIONS:
+  # Exclude people who never transferred a positive amount
+    # df2 <- subset(df2, DGAverage > 0)
+    # df2_0 <- subset(df2, DGAverage == 0)
+
+    
+```
+
+```{r grouping, include=FALSE, echo=FALSE}
+
+#GIVERS vs. NON-GIVERS: did they give a positive amount?
+
+  df2$giver = as.numeric(df2$DGAverage > 0)
+
+#SELFISH vs. GENEROUS: median split participants based on their average transfers
+
+  m = median(df2$DGAverage) 
+  df2_selfish <- subset(df2, DGAverage < m) 
+  df2_generous <- subset(df2, DGAverage >= m) 
+  
+  df2$DGAverage.split = NA 
+  df2$DGAverage.split[df2$DGAverage < m] <- "selfish" 
+  df2$DGAverage.split[df2$DGAverage >= m] <- "generous" 
+  df2$DGAverage.split <- as.factor(df2$DGAverage.split)
+
+#NORM VIOLATORS vs. NORM UPHOLDERS: median split by whether people upheld or violated their own fairness norms
+  
+  df2_fairness_violated <- subset(df2, DGAverage < FairOffer) 
+  df2_fairness_upheld <- subset(df2, DGAverage >= FairOffer) 
+
+  df2$Fair.split = NA 
+  df2$Fair.split[df2$DGAverage < df2$FairOffer] <- "violators" 
+  df2$Fair.split[df2$DGAverage >= df2$FairOffer] <- "upholders"
+  df2$Fair.split <- as.factor(df2$Fair.split)
+
+#UNGENEROUS vs. GENEROUS norm upholders: split on generosity within fairness upholders
+
+  m_fair = median(df2_fairness_upheld$DGAverage,na.rm = TRUE) 
+  df2_fair_selfish <- subset(df2_fairness_upheld, DGAverage < m_fair)
+  df2_fair_generous <- subset(df2_fairness_upheld, DGAverage >= m_fair)
+  
+  df2_fairness_upheld$DGAverage.split = NA
+  df2_fairness_upheld$DGAverage.split[df2_fairness_upheld$DGAverage < m_fair] <- "selfish"
+  df2_fairness_upheld$DGAverage.split[df2_fairness_upheld$DGAverage >= m_fair] <- "generous"  
+  df2_fairness_upheld$DGAverage.split <- as.factor(df2_fairness_upheld$DGAverage.split)
+
+#VEIL OF IGNORANCE VS FULL KNOWLEDGE: manipulation of whether people knew DG role before or after fairness
+    
+  df2_know <- filter(df2, KnowNum == 1) 
+  df2_veil <- filter(df2, KnowNum == 2) 
+
+```
+
+```{r sanity checks, warning=FALSE, message=FALSE, echo=FALSE,include=FALSE}
+
+#[a] are memory errors non-normally distributed, visually? 
+  #ggplot(df2,aes(GuessVsAve))+geom_histogram(binwidth=2)
+
+#[b] are memory errors non-normally distributed, statistically? 
+  shapiro.test(df2$GuessVsAve) 
+
+#[c] can memory errors be explained by noise in DG offers?
+  cor.test(df2$DG.stdev,df2$GuessVsAveA, method="spearman") 
+
+#[d] can memory errors be explained by RT (attention) to DG offers?
+  cor.test(df2$AveRT,df2$GuessVsAveA, method="spearman") 
+
+#[e] can memory errors be explained by non-giving?
+  cor.test(df2$giver,df2$GuessVsAveA, method="spearman") 
+
+#[f] can memory errors be explained by numeracy?
+  cor.test(df2$Numeracy,df2$GuessVsAveA, method="spearman") 
+
+# group differences
+  mw.test(df2$DG.stdev,df2$Fair.split)
+  mw.test(df2$AveRT,df2$Fair.split)
+  mw.test(df2$giver,df2$Fair.split)
+  mw.test(df2$Numeracy,df2$Fair.split)
+
+```
+
+```{r tests,include=FALSE}
+
+#[Check normality]
+  norm = shapiro.test(df2$GuessVsAve)
+
+#[Descriptives]
+  df2_d = describe(df2$DGAverage)
+  df2_v_d = describe(df2_fairness_violated$DGAverage)
+  df2_u_d = describe(df2_fairness_upheld$DGAverage)
+
+#[1] Motivated misremembering (main effect)
+  t1 = w.test_0(df2$GuessVsAve)
+
+#[2] Motivated misremembering: VIOLATOR group
+  t2 = w.test_0(df2_fairness_violated$GuessVsAve)
+
+#[3] Motivated misremembering: UPHOLDER group
+  t3 = w.test_0(df2_fairness_upheld$GuessVsAve)
+  
+#[4] Motivated misremembering: group difference
+  t4 = mw.test(df2$GuessVsAve,df2$Fair.split)
+  
+#[5] Memory accuracy: group difference
+  t5 = mw.test(df2$GuessVsAveA,df2$Fair.split)
+
+##################################################
+  
+#[Descriptives]
+  df2_fu_d = describe(df2_fair_selfish$DGAverage)
+  df2_fg_d = describe(df2_fair_generous$DGAverage)
+  
+#[6] Motivated misremembering: fair UNGENEROUS group
+  t6 = w.test_0(df2_fair_selfish$GuessVsAve)
+
+#[7] Motivated misremembering: fair GENEROUS group
+  t7 = w.test_0(df2_fair_generous$GuessVsAve)
+  
+#[8] Motivated misremembering: group difference
+  t8 = mw.test(df2_fairness_upheld$GuessVsAve,df2_fairness_upheld$DGAverage.split)
+
+##################################################
+  
+# df2_supp = select (df2,Guess,DGAverage,AveRT,DG.stdev,giver,FairVsActual)
+# df2_supp = na.omit(df2) # drops an NA to run supplemental analyses
+
+#[9] Model predicting recalled generosity from actual geneorsity (controlling for decision speed + variance + non-giving + numeracy)
+    t9 <- lm(Guess ~ DGAverage + AveRT + DG.stdev + giver + Numeracy, data=df2)
+    tidy(t9)
+    t9a = AIC(t9)
+    t9b = BIC(t9)
+    t9l = logLik(t9)
+      t9l
+      
+#[10] Model predicting recalled generosity from actual geneorsity fairness deviations (controlling for decision speed + variance + non-giving + numeracy)
+    t10 <- lm(Guess ~ DGAverage + AveRT + DG.stdev + giver + Numeracy + FairVsActual, data=df2)
+    tidy(t10)
+    t10a = AIC(t10)
+    t10b = BIC(t10)
+    t10l = logLik(t10)
+      t10l
+
+#[11] Comparison of models' goodness of fit
+    t11 = lrtest(t9,t10)
+    t11
+  
+```
+
+```{r knit functions,echo=FALSE}
+
+#formatting p-values for APA
+format_pval <- function(x){
+  if (x < .001) return(paste('<', '.001'))
+  if (x > .1) return(paste('=', myround(x, 2)))
+  paste('=', myround(x, 3))   # 3 = no. of digits to round p value to if p < .001 
+}
+
+```
+### Quick summary  
+
+#####Check normality
+
+(*W* = `r myround(norm$s,2)`, *p* = `r format_pval(norm$p)`)
+
+#####Descriptives
+
+N = `r round(df2_d$n,1)`, M = `r round(df2_d$mean,1)`   
+Violators N = `r round(df2_v_d$n,1)`, M = `r round(df2_v_d$mean,1)`   
+Upholders N = `r round(df2_u_d$n,1)`, M = `r round(df2_u_d$mean,1)` 
+
+#####[1] Motivated misremembering (main effect)  
+
+[1] (*V* = `r format(t1$s,scientific=FALSE)`, *p* `r format_pval(t1$p)`, *d* = `r myround(t1$coh,2)`, δ = `r myround(t1$cl,2)`)
+
+#####[2] Motivated misremembering: VIOLATORS group 
+
+[2] (*V* = `r format(t2$s,scientific=FALSE)`, *p* `r format_pval(t2$p)`, *d* = `r myround(t2$coh,2)`, δ = `r myround(t2$cl,2)`)
+
+#####[3] Motivated misremembering: UPHOLDERS group 
+
+[3] (*V* = `r format(t3$s,scientific=FALSE)`, *p* `r format_pval(t3$p)`, *d* = `r myround(t3$coh,2)`, δ = `r myround(t3$cl,2)`)
+
+#####[4] Motivated misremembering: group difference  
+
+[4] (*W* = `r format(t4$s,scientific=FALSE)`, *p* `r format_pval(t4$p)`, *d* = `r myround(t4$coh,2)`, δ = `r myround(t4$cl,2)`)
+
+#####[5] Memory accuracy: group difference  
+
+[5] (*W* = `r format(t5$s,scientific=FALSE)`, *p* `r format_pval(t5$p)`, *d* = `r myround(t5$coh,2)`, δ = `r myround(t5$cl,2)`)
+
+#####Descriptives
+
+N = `r round(df2_d$n,1)`, M = `r round(df2_d$mean,1)`   
+Fair ungenerous N = `r round(df2_fu_d$n,1)`, M = `r round(df2_fu_d$mean,1)`   
+Fair generous N = `r round(df2_fg_d$n,1)`, M = `r round(df2_fg_d$mean,1)`
+
+#####[6] Motivated misremembering: FAIR ungenerous group 
+
+[6] (*V* = `r format(t6$s,scientific=FALSE)`, *p* `r format_pval(t6$p)`, *d* = `r myround(t6$coh,2)`, δ = `r myround(t6$cl,2)`)
+
+#####[7] Motivated misremembering: FAIR generous group 
+
+[7] (*V* = `r format(t7$s,scientific=FALSE)`, *p* `r format_pval(t7$p)`, *d* = `r myround(t7$coh,2)`, δ = `r myround(t7$cl,2)`)
+
+#####[8] Motivated misremembering: group difference  
+
+[8] (*W* = `r format(t8$s,scientific=FALSE)`, *p* `r format_pval(t8$p)`, *d* = `r myround(t8$coh,2)`, δ = `r myround(t8$cl,2)`)
+
+#####[9-11] Model comparison: recall from actual generosity (i) or actual generosity + fairness deviations (ii)
+
+[9-11] (ΔAIC = `r myround(t9a-t10a,2)`, ΔBIC = `r myround(t9b-t10b,2)`, χ2 (`r (t11$D[2])`) = `r myround(t11$Ch[2],2)`, *p* `r format_pval(t11$P[2])`)
+
+
+```{r supplemental tests, echo=FALSE, warning=FALSE, message=FALSE,include=FALSE}
+  
+#[15] effect of veil of ignorance on fairness beliefs
+  mw.test(df2$FairOffer,df2$KnowNum)
+
+#[16] effect of veil of ignorance on transfers
+  mw.test(df2$DGAverage,df2$KnowNum)
+
+#[17] effect of veil of ignorance on absolute memory errors 
+  mw.test(df2$GuessVsAveA,df2$KnowNum)
+  
+#[18] effect of veil of ignorance on norm deviations
+  mw.test(df2$FairVsActual,df2$KnowNum)
+  
+```
+
+```{r s2_tables,echo=FALSE}
+  
+  #apa.reg.table(t9,t10, filename = "s2_table1.doc")
+
+```
+
+```{r s2_fig1, fig.height = 4, fig.width = 3.5,fig.asp = 1,echo=FALSE}
+
+#***choose plot type***
+  plot = "dist" # to plot figure with full data distribution
+  #plot= "means" # to plot figure zoomed in on means
+
+#setup pdf output 
+  # filename = paste("/Users/carlsonr/Box Sync/Projects/Priority/selfishForgetting/Manuscript/Figures/s2_fig1_", plot,".pdf", sep="") #Saves file with 'dist' or 'means' name extension
+  # pdf(file = filename, #The directory you want to save the file in
+  # width = 3, # The width of the plot in inches
+  # height = 3.5) # The height of the plot in inches
+
+#distance specs
+  roundUp <- function(x) ceiling(max(x)/10)*10 # this function allows us to round to the nearest 10 above the max data point
+  if (plot=="dist") {
+    boundary = c(roundUp(max(df2$GuessVsAve))) # for plotting full distribution plot
+    opacity = .1 # raw data points visible
+    inference = "ci" # plot confidence interval
+  } else if (plot=="means"){
+    boundary = 10 # for plotting zoomed in mean comparison plot
+    opacity = 0 # raw data points not visible
+    inference = "se" # plot SEM
+  } else
+    print("specify plot!")
+  
+#pirate plot
+  pirateplot(formula = GuessVsAve ~ Fair.split,
+             data = df2,
+             pal = "google",
+             ylab = "recalled - actual giving (%)",
+             yaxt = "n", #suppress y ticks
+             xlab = "",
+             xaxt = "n", #suppress x ticks
+             gl.lty = 0, #rm gridlines
+             bty="n", # remove plot outline
+             cex.axis = .75, #axis size
+             cex.lab = .8, #label size
+             cex.names = .8 , #name size
+             theme = 4,
+             #bean.f.o = .20,
+             #bean.f.col = c("dodgerblue1","firebrick1"),
+             width.max = .3, #bar width
+             point.o = opacity, #opacity (.1 = distribution plot, 0 = mean comparison plot)
+             point.cex = .5, #size
+             #point.pch = 1,
+             point.col = c("dodgerblue3","firebrick3"), #color
+             avg.line.o = 0, #avg line
+             #avg.line.col = c("black"),
+             avg.line.lwd = .45,
+             inf.method= inference, 
+             inf.disp = "line",
+             inf.b.col = c("dodgerblue3","firebrick3"), #color
+             inf.b.o = 1,
+             inf.f.col = c("black","black"), #color
+             inf.f.o = 1,
+             inf.lwd = .45,
+             bar.b.o = 0, #opacity of bar barders
+             #bar.b.col = c("darkgrey","darkgrey","darkgrey","darkgrey"),
+             bar.f.o = .3,
+             bar.f.col = c("dodgerblue1","firebrick1"),
+             ylim = c(-boundary, boundary),
+             jitter.val = .020) #point jitter
+  
+#tick distance
+  par(mgp = c(2, .5, 0)) # middle value changes distance between ticks and tick labels
+
+#ticks & labels
+  if (boundary==10) {
+  ticks = seq(-boundary,boundary,by=5) # tick positions if boundary is -10 to 10
+  } else {
+  ticks = seq(-boundary,boundary,by=10) # tick positions if boundary is -max to max
+  }
+  labels = as.character(ticks) # tick labels
+  
+#y-axis  
+  axis(side = 2,at = ticks,
+        labels=labels,
+        cex.axis=.7, #size of axis tick labels
+        col.ticks = "gray", #color of ticks
+        col="gray", #color of line connecting ticks
+        tck=-0.01,#length of ticks
+        las=1) #orientation of tick labels
+
+#x-axis
+  axis(side = 1,
+       at = 1:2,
+       c("upholders", "violators"),
+       lwd=0,
+       cex.axis=.80,
+       pos = min(ticks),
+       tck=-0.01) # no ticks on x-axis, just labels
+
+#dashed mid-line
+  abline(h = 0, lty = 2,col="gray")
+
+#save output as pdf
+   # dev.off()
+```
+
+```{r s2_supp_fig1, fig.height = .4, fig.width = 3.5,fig.asp = 1,echo=FALSE}
+
+#***choose plot type***
+  plot = "dist" # to plot figure with full data distribution
+  #plot= "means" # to plot figure zoomed in on means
+
+#setup pdf output 
+  # filename = paste("/Users/carlsonr/Box Sync/Projects/Priority/selfishForgetting/Manuscript/Figures/s2_supp_fig1_", plot,".pdf", sep="") #Saves file with 'dist' or 'means' name extension
+  # pdf(file = filename, #The directory you want to save the file in
+  # width = 3, # The width of the plot in inches
+  # height = 3.5) # The height of the plot in inches
+
+#distance specs
+  roundUp <- function(x) ceiling(max(x)/10)*10 # this function allows us to round to the nearest 10 above the max data point
+  if (plot=="dist") {
+    boundary = roundUp(max(abs(df2$GuessVsAve))) # for plotting full distribution plot
+    opacity = .1 # raw data points visible
+    inference = "ci" # plot confidence interval
+  } else if (plot=="means"){
+    boundary = 10 # for plotting zoomed in mean comparison plot
+    opacity = 0 # raw data points not visible
+    inference = "se" # plot SEM
+  } else
+    print("specify plot!")
+  
+#pirate plot
+  pirateplot(formula = GuessVsAveA ~ Fair.split,
+             data = df2,
+             pal = "google",
+             ylab = "memory errors (absolute %)",
+             yaxt = "n", #suppress y ticks
+             xlab = "",
+             xaxt = "n", #suppress x ticks
+             gl.lty = 0, #rm gridlines
+             bty="n", # remove plot outline
+             cex.axis = .75, #axis size
+             cex.lab = .8, #label size
+             cex.names = .8 , #name size
+             theme = 4,
+             #bean.f.o = .20,
+             #bean.f.col = c("dodgerblue1","firebrick1"),
+             width.max = .3, #bar width
+             point.o = opacity, #opacity (.1 = distribution plot, 0 = mean comparison plot)
+             point.cex = .5, #size
+             #point.pch = 1,
+             point.col = c("dodgerblue3","firebrick3"), #color
+             avg.line.o = 0, #avg line
+             #avg.line.col = c("black"),
+             avg.line.lwd = .45,
+             inf.method= inference, 
+             inf.disp = "line",
+             inf.b.col = c("dodgerblue3","firebrick3"), #color
+             inf.b.o = 1,
+             inf.f.col = c("black","black"), #color
+             inf.f.o = 1,
+             inf.lwd = .45,
+             bar.b.o = 0, #opacity of bar barders
+             #bar.b.col = c("darkgrey","darkgrey","darkgrey","darkgrey"),
+             bar.f.o = .3,
+             bar.f.col = c("dodgerblue1","firebrick1"),
+             ylim = c(0, boundary),
+             jitter.val = .020) #point jitter
+  
+#tick distance
+  par(mgp = c(2, .5, 0)) # middle value changes distance between ticks and tick labels
+
+#ticks & labels
+  if (boundary==10) {
+  ticks = seq(0,boundary,by=5) # tick positions if boundary is -10 to 10
+  } else {
+  ticks = seq(0,boundary,by=10) # tick positions if boundary is -max to max
+  }
+  labels = as.character(ticks) # tick labels
+  
+#y-axis  
+  axis(side = 2,at = ticks,
+        labels=labels,
+        cex.axis=.7, #size of axis tick labels
+        col.ticks = "gray", #color of ticks
+        col="gray", #color of line connecting ticks
+        tck=-0.01,#length of ticks
+        las=1) #orientation of tick labels
+
+#x-axis
+  axis(side = 1,
+       at = 1:2,
+       label = c("upholders", "violators"),
+       lwd=0,
+       cex.axis=.80,
+       pos = min(ticks),
+       tck=-0.01) # no ticks on x-axis, just labels
+  
+#save output as pdf
+   # dev.off()
+```
