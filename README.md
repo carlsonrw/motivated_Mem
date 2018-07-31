@@ -1,5 +1,5 @@
 ## Motivated misremembering: Selfish decisions are more generous in hindsight
-Here we provide raw data and code for the paper "Motivated misremembering: Selfish decisions are more generous in hindsight" (Carlson, Marechal, Oud, Fehr, Crockett, submitted). If you have any questions, or find any bugs, please feel free to email me at ryan.carlson@yale.edu.
+Here we provide raw data and code for the paper "Motivated misremembering: Selfish decisions are more generous in hindsight" (Carlson, Marechal, Oud, Fehr, & Crockett, submitted). If you have any questions, or find any bugs, please feel free to email me at ryan.carlson@yale.edu.
 
 ### Code
 Analysis scripts for Studies 1, 2, and 3 are R Markdown files that can be downloaded here:
