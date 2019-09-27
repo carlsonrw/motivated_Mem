@@ -1,0 +1,975 @@
+---
+title: "motMis - study 4b"
+output: html_document
+---
+```{r install/load packages,include=FALSE}
+
+#Checks if required packages are installed. Installs them if not.
+  # list_pckgs <- c("tidyverse", "psych","lsr","mblm","broom", "effsize","matrixStats","devtools","yarrr","lmtest","lubridate","rstudioapi","apaTables","broman") # list of required packages
+  # new_pckgs <- list_pckgs[!(list_pckgs %in% installed.packages()[,"Package"])] # list of required packages that are not install on this machine
+  # if(length(new_pckgs)) install.packages(new_pckgs) # installs them
+
+#Load libraries
+  library("tidyverse") # plotting, manipulating data etc
+  library("psych") # for trait measures
+  library("lsr") # for computing effect sizes
+  library("mblm") #non-parametric linear regression
+  library("broom") # clean outputs
+  library("effsize") #non-parametric effect sizes
+  library("matrixStats") #calculation SDs for multiple cols
+  library("devtools") #pirateplots
+  library("yarrr")#pirateplots
+  library("lmtest")
+  library("lubridate")
+  library("rstudioapi") # load rstudio api
+  library("apaTables") # for regression tables
+  library("broman") # flexibly display p-values with Rmd function
+  library("MBESS") # CIs on Rsquared in tables
+  
+#Set working directory to the location of this R file (data should also be saved here)
+  # curr_dir <- getActiveDocumentContext()$path # get path to currently open R file
+  # setwd(dirname(curr_dir)) # set the working directory to curr_dirr
+  # #print(getwd()) # print directory
+  # rm("curr_dir","new_pckgs","list_pckgs")
+
+```
+
+```{r non-parametric stats functions,include=FALSE}
+
+#wilcoxon test - paired
+  w.test = function(x,y){
+  t = wilcox.test(x,y, paired=TRUE) #optional: non-parametric CIs with conf.in=TRUE
+    d = cliff.delta(x,y) 
+    da = cohen.d(x,y)
+      tbl = tidy(t) 
+      tbl$method <- tbl$alternative <- tbl$estimate <- NULL #remove strings
+      tbl$cohen.d = da$estimate #add parametric ES
+      tbl$cliff.d = d$estimate #add non-parametric ES
+      #tbl <- sapply( tbl, as.numeric ) #convert to numeric
+        print(tbl) 
+  }
+
+#wilcoxon test - one-sample
+  w.test_0 = function(x){
+  t = wilcox.test(x,mu=0) #optional: non-parametric CIs with conf.in=TRUE
+    d = cliff.delta(x,0) 
+    da = cohensD(x,mu=0)
+      tbl = tidy(t) 
+      tbl$method <- tbl$alternative <- tbl$estimate <- NULL #remove strings
+      tbl$cohen.d = da #add parametric ES
+      tbl$cliff.d = d$estimate #add non-parametric ES
+      #tbl <- sapply( tbl, as.numeric ) #convert to numeric
+        print(tbl) 
+  }
+
+#mann-whitney test 
+  mw.test = function(x,y){
+  t = wilcox.test(x~y) #optional: non-parametric CIs with conf.in=TRUE
+    d = cliff.delta(x~y) 
+    da = cohen.d(x~y)
+      tbl = tidy(t) 
+      tbl$method <- tbl$alternative <- tbl$estimate <- NULL #remove strings
+      tbl$cohen.d = abs(da$estimate) #add parametric ES
+      tbl$cliff.d = abs(d$estimate) #add non-parametric ES
+      #tbl <- sapply( tbl, as.numeric ) #convert to numeric
+        print(tbl) 
+  }
+
+```
+
+```{r read in data set, include=FALSE}
+
+#read data (df4b_1 = initial sample, df4b_2 = additional sample recruited within 3 days to increase power)
+  df4b_1 = read.csv("motMis_s4b_data.csv") # N = 719 after excluding missing data
+  df4b_2 = read.csv("motMis_s4b_data_added.csv") # N = 317 after excluding missing data
+  df4b_2$id = df4b_2$id + nrow(df4b_1)
+  df4b <- rbind(df4b_1, df4b_2)
+    rm("df4b_1","df4b_2")
+
+    # missing data: exclude s4b Ps paired with choice IDs 476 & 692, which have missing data. 
+    subset(df4b, (id.1 == 476), select=c(dg1, dg2, dg3, dg4, dg5)) #  DG choices match: 60 60 60 80 80
+      df4b = subset(df4b, !(id.1 == 476)) 
+    subset(df4b, (id.1 == 692), select=c(dg1, dg2, dg3, dg4, dg5)) #  DG choices match: 30 50 30 10 70
+      df4b = subset(df4b, !(id.1 == 692)) 
+
+#gender and age
+  describe(df4b$age)$mean
+  table(df4b$gender)
+ 
+```
+
+```{r wrangling, include=FALSE}
+
+#rename vars
+  colnames(df4b)[colnames(df4b)=="fairQ_1"] <- "fairQ"
+  colnames(df4b)[colnames(df4b)=="dg1_1"] <- "dg1"
+  colnames(df4b)[colnames(df4b)=="dg2_1"] <- "dg2"
+  colnames(df4b)[colnames(df4b)=="dg3_1"] <- "dg3"
+  colnames(df4b)[colnames(df4b)=="dg4_1"] <- "dg4"
+  colnames(df4b)[colnames(df4b)=="dg5_1"] <- "dg5"
+  colnames(df4b)[colnames(df4b)=="dg1_rt_Page.Submit"] <- "dg1_rt"
+  colnames(df4b)[colnames(df4b)=="dg2_rt_Page.Submit"] <- "dg2_rt"
+  colnames(df4b)[colnames(df4b)=="dg3_rt_Page.Submit"] <- "dg3_rt"
+  colnames(df4b)[colnames(df4b)=="dg4_rt_Page.Submit"] <- "dg4_rt"
+  colnames(df4b)[colnames(df4b)=="dg5_rt_Page.Submit"] <- "dg5_rt"
+  colnames(df4b)[colnames(df4b)=="memQ_4"] <- "Guess"
+
+#trim vars
+  df4b$responsible = trimws(df4b$responsible, which ="left") # remove extra spaces in variable
+  df4b$responsible = as.numeric(df4b$responsible)
+  df4b$conf = trimws(df4b$conf, which ="left") # remove extra spaces in variable
+  df4b$conf = as.numeric(df4b$conf)
+
+```
+
+
+```{r compute variables, include=FALSE}
+
+#compute the true average % transferred + average RT
+  df4b <- df4b %>% mutate(DGAverage=(dg1+dg2+dg3+dg4+dg5)/5, AveRT=(dg1_rt+dg2_rt+dg3_rt+dg4_rt+dg5_rt)/5) 
+    df4b$DGAverage = as.numeric(df4b$DGAverage)
+
+#compute the % difference between recalled transfer vs. actual transfer
+  df4b$GuessVsAve = (df4b$Guess - df4b$DGAverage)
+
+#compute absolute % difference between recalled vs. actual transfer
+  df4b$GuessVsAveA = abs(df4b$GuessVsAve)
+  
+#compute standard deviation for the five transfer decisions for each subject
+  df4b_sd <- c('dg1', 'dg2', 'dg3', 'dg4', 'dg5')
+    df4b <- df4b %>% mutate(DG.stdev=rowSds(as.matrix(.[df4b_sd])))
+
+#compute difference score between fairness vs actual transfer 
+  df4b$FairVsActual = (df4b$fairQ - df4b$DGAverage)
+
+#compute discomfort_t1
+  keys.list <- list(discomfort_t1=c("discomfort1_1","discomfort1_2","discomfort1_3"))
+  discomfort_t1 <- scoreItems(keys.list,df4b)
+  discomfort_t1
+  summary(discomfort_t1)
+  describe(discomfort_t1$scores)
+  df4b$discomfort_t1 <- discomfort_t1$scores #add discomfort composite measure to dataset 
+    
+#compute discomfort_t2
+  keys.list <- list(discomfort_t2=c("discomfort3_1","discomfort3_2","discomfort3_3"))
+  discomfort_t2 <- scoreItems(keys.list,df4b)
+  summary(discomfort_t2)
+  describe(discomfort_t2$scores)
+  df4b$discomfort_t2 <- discomfort_t2$scores #add discomfort composite measure to dataset
+  
+#compute dissonance
+  df4b$diss = as.numeric(df4b$discomfort_t2 - df4b$discomfort_t1) 
+  df4b$diss
+  
+#compute posA_t1
+  keys.list <- list(posA_t1=c("discomfort1_4","discomfort1_5","discomfort1_6","discomfort1_7","discomfort1_8"))
+  posA_t1 <- scoreItems(keys.list,df4b)
+  posA_t1
+  summary(posA_t1)
+  describe(posA_t1$scores)
+  df4b$posA_t1 <- posA_t1$scores #add discomfort composite measure to dataset 
+  
+  hist(df4b$discomfort1_3)
+    
+#compute posA_t2
+  keys.list <- list(posA_t2=c("discomfort3_4","discomfort3_5","discomfort3_6","discomfort3_7","discomfort3_8"))
+  posA_t2 <- scoreItems(keys.list,df4b)
+  summary(posA_t2)
+  describe(posA_t2$scores)
+  df4b$posA_t2 <- posA_t2$scores #add discomfort composite measure to dataset
+  
+#compute posAdiff
+  df4b$posAdiff = as.numeric(df4b$posA_t2 - df4b$posA_t1) 
+  df4b$posAdiff
+  
+rm("keys.list")
+
+```
+
+```{r reformat vars,include=FALSE} 
+
+  df4b$Guess = as.numeric(df4b$Guess)
+  df4b$DGAverage = as.numeric(df4b$DGAverage)
+  df4b$AveRT = as.numeric(df4b$AveRT)
+  df4b$DG.stdev = as.numeric(df4b$DG.stdev)
+  df4b$FairVsActual = as.numeric(df4b$FairVsActual)
+  df4b$discomfort_t1 = as.numeric(df4b$discomfort_t1)
+  df4b$discomfort_t2 = as.numeric(df4b$discomfort_t2)
+  df4b$diss = as.numeric(df4b$diss)
+  df4b$posA_t1 = as.numeric(df4b$posA_t1)
+  df4b$posA_t2 = as.numeric(df4b$posA_t2)
+  df4b$posAdiff = as.numeric(df4b$posAdiff)
+  df4b$conf = as.numeric(df4b$conf)
+  df4b$studytime <- ms(df4b$studytime) # using lubridate library to convert time    
+  df4b$studytime <- as.numeric(df4b$studytime) #minutes converted to numeric
+
+```
+
+```{r exclusions,include=FALSE} 
+
+#EXCLUSIONS
+
+  #1 Failed to follow instructions: bottest = 0 (failed bottest)
+    count(df4b$bottest_filter == 0)
+    df4b <- subset(df4b, bottest_filter == 1)
+
+  #2 Failed comprehension: deception1 = 0 (instructions NOT clear about money)
+    count(df4b$deception1 == 0)
+    df4b <- subset(df4b, deception1 == 1)
+
+  #3 Failed comprehension: deception2 = 0 (intructions NOT clear about other participant)
+    count(df4b$deception2 == 0,na.rm=TRUE)
+    table(is.na(df4b$deception2))
+    df4b <- subset(df4b, deception2 == 1)
+
+  #4 Reported skepticism about the study: feedbackexcl = 0 (did NOT believe in P2)
+    count(df4b$feedbackexcl <= 0)
+    df4b <- subset(df4b, feedbackexcl > 0)
+
+  #5 Outliers on our key measure: GuessVsAve
+    #ggplot(df4b, aes("",GuessVsAve))+geom_boxplot()+theme_classic() # before
+    stats = psych::describe(df4b$GuessVsAve) #exclude extreme outliers (4 SDs from the mean).
+    high_cutoff = stats$mean + (stats$sd*4)
+    low_cutoff = stats$mean - (stats$sd*4)
+
+    #SD outliers for memory errors
+    count(df4b$GuessVsAve >= high_cutoff)
+    df4b <- subset(df4b, GuessVsAve < high_cutoff)
+
+    count(df4b$GuessVsAve <= low_cutoff)
+    df4b <- subset(df4b, GuessVsAve > low_cutoff)
+  #ggplot(df4b, aes("",GuessVsAve))+geom_boxplot()+theme_classic() # after
+
+rm("stats","high_cutoff","low_cutoff")
+
+
+#SUPPLEMENTAL EXCLUSIONS:
+
+  #Non-givers: Exclude people who never transferred a positive amount
+     #df4b <- subset(df4b, DGAverage > 0)
+     # df4b_0 <- subset(df4b, DGAverage == 0)
+
+  #Static deciders: Exclude people who always gave the same amount
+    #df4b <- subset(df4b, DG.stdev > 0)    
+
+  #Responsibility: Exclude based on perceived responsibility
+    #df4b <- subset(df4b, responsible == 1)
+    #df4b <- subset(df4a, responsible > 1)
+```
+
+```{r export s4b mems, include=FALSE, echo=FALSE}
+    
+#decisions forced choice study
+  #write.csv(df4b, file = "motMis_s4b_mems.csv") 
+
+```
+
+```{r grouping, include=FALSE, echo=FALSE}
+
+#GIVERS vs. NON-GIVERS: did they give a positive amount?
+
+  df4b$giver = as.numeric(df4b$DGAverage > 0)
+
+
+#SELFISH vs. GENEROUS: median split participants based on their average transfers
+
+  m = median(df4b$DGAverage,na.rm = TRUE) 
+  df4b_selfish <- subset(df4b, DGAverage < m) 
+  df4b_generous <- subset(df4b, DGAverage >= m) 
+  
+  df4b$DGAverage.split = NA 
+  df4b$DGAverage.split[df4b$DGAverage < m] <- "selfish" 
+  df4b$DGAverage.split[df4b$DGAverage >= m] <- "generous" 
+  df4b$DGAverage.split <- as.factor(df4b$DGAverage.split)
+    
+  
+#NORM VIOLATORS vs. NORM UPHOLDERS: split by whether people upheld or violated their own fairness norms
+  
+  a=df4b$dg1 < df4b$fairQ
+  b=df4b$dg2 < df4b$fairQ
+  c=df4b$dg3 < df4b$fairQ
+  d=df4b$dg4 < df4b$fairQ
+  e=df4b$dg5 < df4b$fairQ
+  df4b$violations <- a+b+c+d+e
+  
+  df4b_violators <- subset(df4b, DGAverage < fairQ) 
+  df4b_upholders <- subset(df4b, DGAverage >= fairQ) 
+
+  df4b$Fair.split = NA 
+  df4b$Fair.split[df4b$DGAverage < df4b$fairQ] <- "violators" 
+  df4b$Fair.split[df4b$DGAverage >= df4b$fairQ] <- "upholders"
+  df4b$Fair.split <- as.factor(df4b$Fair.split)
+
+    
+#UNGENEROUS vs. GENEROUS norm upholders: split on generosity within fairness upholders
+  
+  m_fair = median(df4b_upholders$DGAverage,na.rm = TRUE) 
+  df4b_fair_selfish <- subset(df4b_upholders, DGAverage < m_fair)
+  df4b_fair_generous <- subset(df4b_upholders, DGAverage > m_fair)
+  
+  df4b_upholders$DGAverage.split = NA 
+  df4b_upholders$DGAverage.split[df4b_upholders$DGAverage < m_fair] <- "selfish"
+  df4b_upholders$DGAverage.split[df4b_upholders$DGAverage > m_fair] <- "generous"  
+  df4b_upholders$DGAverage.split <- as.factor(df4b_upholders$DGAverage.split)
+
+
+#MOTIVATED MEMORY: create variables capturing positive (motivated) or negative (unmotivated) memory errors
+  
+  df4b$motmem = NA
+  df4b$motmem[df4b$GuessVsAve < 0] = 0
+  df4b$motmem[df4b$GuessVsAve > 0] = 1
+  df4b$motmem = as.factor(df4b$motmem)
+  
+  df4b_upholders$motmem = NA
+  df4b_upholders$motmem[df4b_upholders$GuessVsAve < 0] = 0
+  df4b_upholders$motmem[df4b_upholders$GuessVsAve > 0] = 1
+  df4b_upholders$motmem = as.factor(df4b_upholders$motmem)
+    table(df4b_upholders$motmem)
+  
+  df4b_violators$motmem = NA
+  df4b_violators$motmem[df4b_violators$GuessVsAve < 0] = 0
+  df4b_violators$motmem[df4b_violators$GuessVsAve > 0] = 1
+  df4b_violators$motmem = as.factor(df4b_violators$motmem)
+    table(df4b_violators$motmem)
+
+
+```
+
+```{r sanity checks, warning=FALSE, message=FALSE, echo=FALSE, include=FALSE}
+
+#[a] are memory errors non-normally distributed, visually? 
+  ggplot(df4b,aes(GuessVsAve))+geom_histogram(binwidth=2)
+
+#[b] are memory errors non-normally distributed, statistically? 
+  shapiro.test(df4b$GuessVsAve) 
+
+#[c] can memory errors be explained by noise in DG offers?
+  cor.test(df4b$DG.stdev,df4b$GuessVsAveA, method="spearman") 
+
+#[d] can memory errors be explained by RT (attention) to DG offers?
+  cor.test(df4b$AveRT,df4b$GuessVsAveA, method="spearman") 
+
+#[e] can memory errors be explained by non-giving?
+  cor.test(df4b$giver,df4b$GuessVsAveA, method="spearman") 
+
+#[e] can memory errors be explained by how long people took to complete the study?
+  cor.test(as.numeric(df4b$studytime),df4b$GuessVsAveA,method="spearman")
+
+#[f] can memory errors be explained by numeracy?
+  cor.test(df4b$Numeracy,df4b$GuessVsAveA, method="spearman") 
+  
+#[g] were participants responsible for their actions?
+  mean(df4b$responsible)
+  sd(df4b$responsible)
+  count(df4b$responsible==1)
+  nrow(df4b)
+  count(df4b$responsible==1)/nrow(df4b)
+  
+
+# group differences
+  mw.test(df4b$DG.stdev,df4b$Fair.split)
+  mw.test(df4b$AveRT,df4b$Fair.split)
+  mw.test(df4b$giver,df4b$Fair.split)
+  mw.test(df4b$Numeracy,df4b$Fair.split)
+
+```
+
+```{r tests,echo=FALSE,warning=FALSE,include=FALSE}
+
+#[Check normality]
+  norm = shapiro.test(df4b$GuessVsAve)
+
+#[Descriptives]
+  df4b_d = describe(df4b$DGAverage)
+  df4b_v_d = describe(df4b_violators$DGAverage)
+  df4b_u_d = describe(df4b_upholders$DGAverage)
+  df4b_r = describe(df4b$Guess)
+  df4b_v_r = describe(df4b_violators$Guess)
+  df4b_u_r = describe(df4b_upholders$Guess)
+
+#[1] Motivated misremembering (main effect)
+  t1 = w.test_0(df4b$GuessVsAve)
+
+#[2] Motivated misremembering: VIOLATOR group
+  t2 = w.test_0(df4b_violators$GuessVsAve)
+
+#[3] Motivated misremembering: UPHOLDER group
+  t3 = w.test_0(df4b_upholders$GuessVsAve)
+
+#[4] Motivated misremembering: group difference
+  t4 = mw.test(df4b$GuessVsAve,df4b$Fair.split)
+  
+#[5] Memory accuracy: group difference
+  t5 = mw.test(df4b$GuessVsAveA,df4b$Fair.split)
+
+##################################################
+  
+#[Descriptives]
+  df4b_fu_d = describe(df4b_fair_selfish$DGAverage)
+  df4b_fg_d = describe(df4b_fair_generous$DGAverage)
+  
+#[6] Motivated misremembering: fair UNGENEROUS group
+  t6 = w.test_0(df4b_fair_selfish$GuessVsAve)
+
+#[7] Motivated misremembering: fair GENEROUS group
+  t7 = w.test_0(df4b_fair_generous$GuessVsAve)
+ 
+#[8] Motivated misremembering: group difference
+  t8 = mw.test(df4b_upholders$GuessVsAve,df4b_upholders$DGAverage.split)
+
+##################################################
+
+#[9] Model predicting recalled generosity from actual geneorsity (controlling for decision speed + variance + non-giving + numeracy)
+    df4b_lm = select(df4b,Guess,DGAverage,AveRT,DG.stdev,giver,FairVsActual,Numeracy,responsible)
+    df4b_lm = na.omit(df4b_lm)
+
+    t9 <- lm(Guess ~ DGAverage + AveRT + DG.stdev + giver + Numeracy, data=df4b_lm)
+    tidy(t9)
+    t9a = AIC(t9)
+    t9b = BIC(t9)
+    t9l = logLik(t9)
+      t9l
+      
+#[10] Model predicting recalled generosity from actual geneorsity fairness deviations (controlling for decision speed + variance + non-giving + numeracy)
+    t10 <- lm(Guess ~ DGAverage + AveRT + DG.stdev + giver + Numeracy + FairVsActual, data=df4b_lm)
+    tidy(t10)
+    t10a = AIC(t10)
+    t10b = BIC(t10)
+    t10l = logLik(t10)
+      t10l
+
+#[11] Comparison of models' goodness of fit
+    t11 = lrtest(t9,t10)
+    t11
+
+##################################################
+
+#[12] Confidence: Correlations
+  t12 = cor.test(df4b$conf,df4b$GuessVsAveA, method="spearman") 
+  
+#[13] Confidence: Group difference
+  t13 = mw.test(df4b$conf,df4b$Fair.split)
+  
+#[14] Discomfort and positive affect
+  t14b = mw.test(df4b$discomfort_t2,df4b$Fair.split)
+  t14b = mw.test(df4b$diss,df4b$Fair.split)
+  t14c = mw.test(df4b$posA_t2,df4b$Fair.split)
+  t14d = mw.test(df4b$posAdiff,df4b$Fair.split)
+
+#[15] Discomfort benefits of memory errors: Upholders & Violators
+  t15a = kruskal.test(diss ~ Fair.split, data = df4b)
+  t15b = kruskal.test(diss ~ motmem, data = df4b)
+  int = interaction(df4b$Fair.split, df4b$motmem)
+  t15c = kruskal.test(diss ~ int, data = df4b)  
+  t15d = mw.test(df4b_upholders$diss,df4b_upholders$motmem)
+  t15e = mw.test(df4b_violators$diss,df4b_violators$motmem)
+
+  
+```
+
+```{r knit functions,echo=FALSE}
+
+#formatting p-values for APA
+format_pval <- function(x){
+  if (x < .001) return(paste('<', '.001'))
+  if (x > .1) return(paste('=', myround(x, 2)))
+  paste('=', myround(x, 3))   # 3 = no. of digits to round p value to if p < .001 
+}
+
+```
+#####Check normality
+
+(*W* = `r myround(norm$s,2)`, *p* `r format_pval(norm$p)`)
+
+#####Descriptives
+
+N = `r round(df4b_d$n,1)`, %given (M = `r myround(df4b_d$mean,2)`, SD = `r myround(df4b_d$sd,2)`), %recalled (M = `r myround(df4b_r$mean,2)`, SD =`r myround(df4b_r$sd,2)`)  
+Violators N = `r round(df4b_v_d$n,1)`, %given (M = `r myround(df4b_v_d$mean,2)`, SD = `r myround(df4b_v_d$sd,2)`), %recalled (M = `r myround(df4b_v_r$mean,2)`, SD =`r myround(df4b_v_r$sd,2)`)  
+Upholders N = `r round(df4b_u_d$n,1)`, %given (M = `r myround(df4b_u_d$mean,2)`, SD = `r myround(df4b_u_d$sd,2)`), %recalled (M = `r myround(df4b_u_r$mean,2)`, SD =`r myround(df4b_u_r$sd,2)`)  
+
+
+#####[1] Motivated misremembering (main effect)  
+
+[1] (*V* = `r format(t1$s,scientific=FALSE)`, *p* `r format_pval(t1$p)`, *d* = `r myround(t1$coh,2)`, δ = `r myround(t1$cl,2)`)
+
+#####[2] Motivated misremembering: VIOLATORS group 
+
+[2] (*V* = `r format(t2$s,scientific=FALSE)`, *p* `r format_pval(t2$p)`, *d* = `r myround(t2$coh,2)`, δ = `r myround(t2$cl,2)`)
+
+#####[3] Motivated misremembering: UPHOLDERS group 
+
+[3] (*V* = `r format(t3$s,scientific=FALSE)`, *p* `r format_pval(t3$p)`, *d* = `r myround(t3$coh,2)`, δ = `r myround(t3$cl,2)`)
+
+#####[4] Motivated misremembering: group difference  
+
+[4] (*W* = `r format(t4$s,scientific=FALSE)`, *p* `r format_pval(t4$p)`, *d* = `r myround(t4$coh,2)`, δ = `r myround(t4$cl,2)`)
+
+#####[5] Memory accuracy: group difference  
+
+[5] (*W* = `r format(t5$s,scientific=FALSE)`, *p* `r format_pval(t5$p)`, *d* = `r myround(t5$coh,2)`, δ = `r myround(t5$cl,2)`)
+
+#####Descriptives
+
+N = `r round(df4b_d$n,1)`, M = `r myround(df4b_d$mean,1)`   
+Fair ungenerous N = `r round(df4b_fu_d$n,1)`, M = `r myround(df4b_fu_d$mean,1)`   
+Fair generous N = `r round(df4b_fg_d$n,1)`, M = `r myround(df4b_fg_d$mean,1)`
+
+#####[6] Motivated misremembering: FAIR ungenerous group 
+
+[6] (*V* = `r format(t6$s,scientific=FALSE)`, *p* `r format_pval(t6$p)`, *d* = `r myround(t6$coh,2)`, δ = `r myround(t6$cl,2)`)
+
+#####[7] Motivated misremembering: FAIR generous group 
+
+[7] (*V* = `r format(t7$s,scientific=FALSE)`, *p* `r format_pval(t7$p)`, *d* = `r myround(t7$coh,2)`, δ = `r myround(t7$cl,2)`)
+
+#####[8] Motivated misremembering: group difference  
+
+[8] (*W* = `r format(t8$s,scientific=FALSE)`, *p* `r format_pval(t8$p)`, *d* = `r myround(t8$coh,2)`, δ = `r myround(t8$cl,2)`)
+
+#####[9-11] Model comparison: recall from actual generosity (i) or actual generosity + fairness deviations (ii)
+
+[9-11] (ΔAIC = `r myround(t9a-t10a,2)`, ΔBIC = `r myround(t9b-t10b,2)`, χ2 (`r (t11$D[2])`) = `r myround(t11$Ch[2],2)`, *p* `r format_pval(t11$P[2])`)
+
+#####[12] Confidence: Correlations
+
+[12]  Unsigned memory errors (*r~s~* = `r myround(t12$e,2)`, *p* `r format_pval(t12$p.v)`)
+
+#####[13] Confidence: Group difference
+[13] (*W* = `r format(t13$s,scientific=FALSE)`, *p* `r format_pval(t13$p)`, *d* = `r myround(t13$coh,2)`, δ = `r myround(t13$cl,2)`)
+
+#####[14] Moral and emotional benefits
+[14b] Discomfort (*W* = `r format(t14b$s,scientific=FALSE)`, *p* `r format_pval(t14b$p)`, *d* = `r myround(t14b$coh,2)`, δ = `r myround(t14b$cl,2)`)   
+[14b] Discomfort Diff (*W* = `r format(t14b$s,scientific=FALSE)`, *p* `r format_pval(t14b$p)`, *d* = `r myround(t14b$coh,2)`, δ = `r myround(t14b$cl,2)`)  
+[14c] Positive Affect (*W* = `r format(t14c$s,scientific=FALSE)`, *p* `r format_pval(t14c$p)`, *d* = `r myround(t14c$coh,2)`, δ = `r myround(t14c$cl,2)`)   
+[14d] Positive Affect Diff (*W* = `r format(t14d$s,scientific=FALSE)`, *p* `r format_pval(t14d$p)`, *d* = `r myround(t14d$coh,2)`, δ = `r myround(t14d$cl,2)`)
+
+#####[15] Discomfort Diff benefits of memory errors: Upholders & Violators
+
+[15a] 2x2 Main effect: Fairness Standards (*H~kruskal.wallis~*(`r (t15a$pa)`) = `r myround(t15a$s,2)`, *p* `r format_pval(t15a$p.v)`)  
+[15b] 2x2 Main effect: Memory errors (H(`r (t15b$pa)`) = `r myround(t15b$s,2)`, *p* `r format_pval(t15b$p.v)`)  
+[15c] 2x2 Interaction: Fairness standards x Memory errors (H(`r (t15c$pa)`) = `r myround(t15c$s,2)`, *p* `r format_pval(t15c$p.v)`)  
+[15d] Contrast: Discomfort - Upholders  (*W* = `r format(t15d$s,scientific=FALSE)`, *p* `r format_pval(t15d$p)`, *d* = `r myround(t15d$coh,2)`, δ = `r myround(t15d$cl,2)`)   
+[15e] Contrast: Discomfort - Violators (*W* = `r format(t15e$s,scientific=FALSE)`, *p* `r format_pval(t15e$p)`, *d* = `r myround(t15e$coh,2)`, δ = `r myround(t15e$cl,2)`)  
+
+```{r s4b_tables,echo=FALSE}
+
+  #apa.reg.table(t9,t10, filename = "s4b_nr_table2.doc")
+
+```
+
+```{r s4b_fig1, fig.height = 4, fig.width = 3.5, fig.asp = 1,echo=FALSE}
+
+#***choose plot type***
+  #plot = "dist" # to plot figure with full data distribution
+  plot= "means" # to plot figure zoomed in on means
+
+#setup pdf output 
+  filename = paste("~/Box Sync/Projects/Active/selfishForgetting/Manuscript/Figures/s4b_fig1b_", plot,".pdf", sep="") #Saves file with 'dist' or 'means' name extension
+  pdf(file = filename, #The directory you want to save the file in
+  width = 3, # The width of the plot in inches
+  height = 3.5) # The height of the plot in inches
+
+#distance specs
+  roundUp <- function(x) ceiling(max(x)/10)*10 # this function allows us to round to the nearest 10 above the max data point
+  if (plot=="dist") {
+    boundary = c(roundUp(max(df4b$GuessVsAve))) # for plotting full distribution plot
+    opacity = .15 # raw data points visible
+    inference = "ci" # plot confidence interval
+  } else if (plot=="means"){
+    boundary = 10 # for plotting zoomed in mean comparison plot
+    opacity = 0 # raw data points not visible
+    inference = "se" # plot SEM
+  } else
+    print("specify plot!")
+  
+#pirate plot
+  pirateplot(formula = GuessVsAve ~ Fair.split,
+             data = df4b,
+             pal = "google",
+             ylab = "recalled - actual giving (%)",
+             yaxt = "n", #suppress y ticks
+             xlab = "",
+             xaxt = "n", #suppress x ticks
+             gl.lty = 0, #rm gridlines
+             bty="n", # remove plot outline
+             cex.axis = .75, #axis size
+             cex.lab = .8, #label size
+             cex.names = .8 , #name size
+             theme = 4,
+             #bean.f.o = .20,
+             #bean.f.col = c("dodgerblue1","firebrick1"),
+             width.max = .3, #bar width
+             point.o = opacity, #opacity (.1 = distribution plot, 0 = mean comparison plot)
+             point.cex = .5, #size
+             #point.pch = 1,
+             point.col = c("dodgerblue3","firebrick3"), #color
+             avg.line.o = 0, #avg line
+             #avg.line.col = c("black"),
+             avg.line.lwd = .45,
+             inf.method= inference, 
+             inf.disp = "line",
+             inf.b.col = c("dodgerblue3","firebrick3"), #color
+             inf.b.o = 1,
+             inf.f.col = c("black","black"), #color
+             inf.f.o = 1,
+             inf.lwd = .45,
+             bar.b.o = 0, #opacity of bar barders
+             #bar.b.col = c("darkgrey","darkgrey","darkgrey","darkgrey"),
+             bar.f.o = .3,
+             bar.f.col = c("dodgerblue1","firebrick1"),
+             ylim = c(-boundary, boundary),
+             jitter.val = .020) #point jitter
+  
+#tick distance
+  par(mgp = c(2, .5, 0)) # middle value changes distance between ticks and tick labels
+
+#ticks & labels
+  if (boundary==10) {
+  ticks = seq(-boundary,boundary,by=5) # tick positions if boundary is -10 to 10
+  } else {
+  ticks = seq(-boundary,boundary,by=10) # tick positions if boundary is -max to max
+  }
+  labels = as.character(ticks) # tick labels
+  
+#y-axis  
+  axis(side = 2,at = ticks,
+        labels=labels,
+        cex.axis=.7, #size of axis tick labels
+        col.ticks = "gray", #color of ticks
+        col="gray", #color of line connecting ticks
+        tck=-0.01,#length of ticks
+        las=1) #orientation of tick labels
+
+#x-axis
+  axis(side = 1,
+       at = 1:2,
+       c("upholders", "violators"),
+       lwd=0,
+       cex.axis=.80,
+       pos = min(ticks),
+       tck=-0.01) # no ticks on x-axis, just labels
+
+#dashed mid-line
+  abline(h = 0, lty = 2,col="gray")
+
+#save output as pdf
+   # dev.off()
+```
+
+```{r s4b_supp_fig1, fig.height = 4, fig.width = 3.5, fig.asp = 1,echo=FALSE}
+
+#***choose plot type***
+  plot = "dist" # to plot figure with full data distribution
+  #plot= "means" # to plot figure zoomed in on means
+
+#setup pdf output 
+  # filename = paste("~/Box Sync/Projects/Priority/selfishForgetting/Manuscript/Figures/s4b_supp_fig1_", plot,".pdf", sep="") #Saves file with 'dist' or 'means' name extension
+  # pdf(file = filename, #The directory you want to save the file in
+  # width = 3, # The width of the plot in inches
+  # height = 3.5) # The height of the plot in inches
+
+#distance specs
+  if (plot=="dist") {
+    boundary = round(max(abs(df4b$GuessVsAve))) # for plotting full distribution plot
+    opacity = .15 # raw data points visible
+    inference = "ci" # plot confidence interval
+  } else if (plot=="means"){
+    boundary = 10 # for plotting zoomed in mean comparison plot
+    opacity = 0 # raw data points not visible
+    inference = "se" # plot SEM
+  } else
+    print("specify plot!")
+  
+#pirate plot
+  pirateplot(formula = GuessVsAveA ~ Fair.split,
+             data = df4b,
+             pal = "google",
+             ylab = "memory errors (absolute %)",
+             yaxt = "n", #suppress y ticks
+             xlab = "",
+             xaxt = "n", #suppress x ticks
+             gl.lty = 0, #rm gridlines
+             bty="n", # remove plot outline
+             cex.axis = .75, #axis size
+             cex.lab = .8, #label size
+             cex.names = .8 , #name size
+             theme = 4,
+             #bean.f.o = .20,
+             #bean.f.col = c("dodgerblue1","firebrick1"),
+             width.max = .3, #bar width
+             point.o = opacity, #opacity (.1 = distribution plot, 0 = mean comparison plot)
+             point.cex = .5, #size
+             #point.pch = 1,
+             point.col = c("dodgerblue3","firebrick3"), #color
+             avg.line.o = 0, #avg line
+             #avg.line.col = c("black"),
+             avg.line.lwd = .45,
+             inf.method= inference, 
+             inf.disp = "line",
+             inf.b.col = c("dodgerblue3","firebrick3"), #color
+             inf.b.o = 1,
+             inf.f.col = c("black","black"), #color
+             inf.f.o = 1,
+             inf.lwd = .45,
+             bar.b.o = 0, #opacity of bar barders
+             #bar.b.col = c("darkgrey","darkgrey","darkgrey","darkgrey"),
+             bar.f.o = .3,
+             bar.f.col = c("dodgerblue1","firebrick1"),
+             ylim = c(0, boundary),
+             jitter.val = .020) #point jitter
+  
+#tick distance
+  par(mgp = c(2, .5, 0)) # middle value changes distance between ticks and tick labels
+
+#ticks & labels
+  if (boundary==10) {
+  ticks = seq(0,boundary,by=5) # tick positions if boundary is -10 to 10
+  } else {
+  ticks = seq(0,boundary,by=10) # tick positions if boundary is -max to max
+  }
+  labels = as.character(ticks) # tick labels
+  
+#y-axis  
+  axis(side = 2,at = ticks,
+        labels=labels,
+        cex.axis=.7, #size of axis tick labels
+        col.ticks = "gray", #color of ticks
+        col="gray", #color of line connecting ticks
+        tck=-0.01,#length of ticks
+        las=1) #orientation of tick labels
+
+#x-axis
+  axis(side = 1,
+       at = 1:2,
+       label = c("upholders", "violators"),
+       lwd=0,
+       cex.axis=.80,
+       pos = min(ticks),
+       tck=-0.01) # no ticks on x-axis, just labels
+  
+#save output as pdf
+   # dev.off()
+```
+
+```{r s4b_fig2, fig.height = 4, fig.width = 3.5, fig.asp = 1,echo=FALSE}
+
+#***choose plot type***
+  plot = "dist" # to plot figure with full data distribution
+  #plot= "means" # to plot figure zoomed in on means
+
+#setup pdf output 
+  # filename = paste("~/Box Sync/Projects/Priority/selfishForgetting/Manuscript/Figures/s4b_fig2_", plot,".pdf", sep="") #Saves file with 'dist' or 'means' name extension
+  # pdf(file = filename, #The directory you want to save the file in
+  # width = 3, # The width of the plot in inches
+  # height = 3.5) # The height of the plot in inches
+
+#distance specs
+  if (plot=="dist") {
+    boundary = c(1,7) # full range
+    opacity = .15 # raw data points visible
+    inference = "ci" # plot confidence interval
+  } else if (plot=="means"){
+    boundary = c(5,7)
+    opacity = 0 # raw data points not visible
+    inference = "se" # plot SEM
+  } else
+    print("specify plot!")
+       
+#pirate plot
+  pirateplot(formula = conf ~ Fair.split,
+             data = df4b,
+             pal = "google",
+             ylab = "memory confidence",
+             yaxt = "n", #suppress y ticks
+             xlab = "",
+             xaxt = "n", #suppress x ticks
+             gl.lty = 0, #rm gridlines
+             bty="n", # remove plot outline
+             cex.axis = .75, #axis size
+             cex.lab = .8, #label size
+             cex.names = .8 , #name size
+             theme = 4,
+             #bean.f.o = .20,
+             #bean.f.col = c("seashell4","dodgerblue1","seashell4","firebrick1"),
+             width.max = .3, #bar width
+             point.o = opacity, #opacity (.1 = distribution plot, 0 = mean comparison plot)
+             point.cex = .5, #size
+             #point.pch = 1,
+             point.col = c("dodgerblue3","firebrick3"), #color
+             avg.line.o = 0, #avg line
+             #avg.line.col = c("black"),
+             avg.line.lwd = .45,
+             inf.method = inference, 
+             inf.disp = "line",
+             inf.b.col = c("dodgerblue1","firebrick1"), #color
+             inf.b.o = 1,
+             inf.f.col = c("black","black"), #color
+             inf.f.o = 1,
+             inf.lwd = .45,
+             bar.b.o = 0, #opacity of bar barders
+             #bar.b.col = c("darkgrey","darkgrey","darkgrey","darkgrey"),
+             bar.f.o = .3,
+             bar.f.col = c("dodgerblue1","firebrick1"),
+             ylim = boundary,
+             jitter.val = .020) #point jitter
+  
+#tick distance
+  par(mgp = c(2, .5, 0)) # middle value changes distance between ticks and tick labels
+
+#ticks & labels
+  ticks = seq(boundary[1],boundary[2],by=1) # tick positions 
+  labels = as.character(ticks) # tick labels
+
+#y-axis
+  axis(side = 2,at = ticks,
+        labels=labels,
+        cex.axis=.7, #size of axis tick labels
+        col.ticks = "gray", #color of ticks
+        col="gray", #color of line connecting ticks
+        tck=-0.01,#length of ticks
+        las=1) #orientation of tick labels
+
+#x-axis
+  axis(side = 1,
+       at = 1:2,
+       label = c("upholders", "violators"),
+       lwd=0,
+       cex.axis=.8,
+       pos = (min(ticks)-.05), # distance between labels and start of y axis
+       tck=-0.01) # no ticks on x-axis, just labels
+
+#save output
+ # dev.off()
+```
+
+```{r s4b_fig3, fig.height = 4, fig.width = 5,fig.asp = .65,echo=FALSE}
+
+# #***choose plot type***
+#   #plot = "dist" # to plot figure with full data distribution
+#   plot= "means" # to plot figure zoomed in on means
+# 
+# #setup pdf output 
+#   # filename = paste("~/Box Sync/Projects/Priority/selfishForgetting/Manuscript/Figures/s4b_fig3_", plot,".pdf", sep="") #Saves file with 'dist' or 'means' name extension
+#   # pdf(file = filename, #The directory you want to save the file in
+#   # width = 5.625, # The width of the plot in inches
+#   # height = 3.5) # The height of the plot in inches
+# 
+# #setup plot
+# 
+#   df4b_motmem = select(df4b,motmem,Fair.split,posAdiff,image)
+#   df4b_motmem = na.omit(df4b_motmem)
+# 
+#   #setup plot
+#   names(df4b_motmem)[1] = "memory" #rename for plotting
+#   df4b_motmem$memory <- as.character(df4b_motmem$memory)
+#   df4b_motmem$memory[df4b_motmem$memory == "0"] <- "self-defeating"
+#   df4b_motmem$memory[df4b_motmem$memory == "1"] <- "self-serving"
+#   df4b_motmem$memory <- as.factor(df4b_motmem$memory)
+#   df4b_motmem$memory = factor(df4b_motmem$memory, levels=c("self-defeating","self-serving"))
+#   attr(df4b_motmem$Fair.split, "variable.labels") <- "" #so no interaction label appears
+#   attr(df4b_motmem$memory, "variable.labels") <- "" #so no interaction label appears
+# 
+# #distance specs
+#   if (plot=="dist") {
+#     boundary = c(1,7) # full range
+#     opacity = .15 # raw data points visible
+#     inference = "ci" # plot confidence interval
+#   } else if (plot=="means"){
+#     boundary = c(3,7)
+#     opacity = 0 # raw data points not visible
+#     inference = "se" # plot SEM
+#   } else
+#     print("specify plot!")
+#        
+# #pirate plot
+#   pirateplot(formula = posAdiff ~ memory + Fair.split,
+#              data = df4b_motmem,
+#              pal = "google",
+#              ylab = "positive affect",
+#              yaxt = "n", #suppress y ticks
+#              xlab = "",
+#              xaxt = "n", #suppress x ticks
+#              gl.lty = 0, #rm gridlines
+#              bty="n", # remove plot outline
+#              cex.axis = .75, #axis size
+#              cex.lab = .8, #label size
+#              cex.names = .8 , #name size
+#              theme = 4,
+#              #bean.f.o = .20,
+#              #bean.f.col = c("seashell4","dodgerblue1","seashell4","firebrick1"),
+#              width.max = .3, #bar width
+#              point.o = opacity, #opacity (.1 = distribution plot, 0 = mean comparison plot)
+#              point.cex = .5, #size
+#              #point.pch = 1,
+#              point.col = c("seashell4","dodgerblue3","seashell4","firebrick3"), #color
+#              avg.line.o = 0, #avg line
+#              #avg.line.col = c("black"),
+#              avg.line.lwd = .45,
+#              inf.method = inference, 
+#              inf.disp = "line",
+#              inf.b.col = c("seashell4","dodgerblue1","seashell4","firebrick1"), #color
+#              inf.b.o = 1,
+#              inf.f.col = c("black","black","black","black"), #color
+#              inf.f.o = 1,
+#              inf.lwd = .45,
+#              bar.b.o = 0, #opacity of bar barders
+#              #bar.b.col = c("darkgrey","darkgrey","darkgrey","darkgrey"),
+#              bar.f.o = c(.15,.5,.15,.5),
+#              bar.f.col = c("dodgerblue1","dodgerblue1","firebrick1","firebrick1"),
+#              ylim = boundary,
+#              jitter.val = .020) #point jitter
+#   
+# #tick distance
+#   par(mgp = c(2, .5, 0)) # middle value changes distance between ticks and tick labels
+# 
+# #ticks & labels
+#   ticks = seq(boundary[1],boundary[2],by=1) # tick positions 
+#   labels = as.character(ticks) # tick labels
+# 
+# #y-axis
+#   axis(side = 2,at = ticks,
+#         labels=labels,
+#         cex.axis=.7, #size of axis tick labels
+#         col.ticks = "gray", #color of ticks
+#         col="gray", #color of line connecting ticks
+#         tck=-0.01,#length of ticks
+#         las=1) #orientation of tick labels
+# 
+# #x-axis
+#   axis(side = 1,
+#        at = 1:5,
+#        label = c("self-defeating","self-serving","","self-defeating","self-serving"),
+#        lwd=0,
+#        cex.axis=.7,
+#        pos = (min(ticks)),
+#        tck=-0.01) # no ticks on x-axis, just labels
+#   
+# title("violators", adj = 0.81, line = -10.5,cex.main=.8,font.main = 1)
+# title("upholders", adj = 0.19, line = -10.5,cex.main=.8,font.main = 1)
+# 
+# ### WARNING: this figure looks bad in R, but the PDF output looks good 8)
+# 
+# #save output as pdf
+#    # dev.off()
+```
+
+```{r s4b_respHist,echo=FALSE}
+
+#setup pdf output
+  # pdf(file = "~/Box Sync/s4b_respHist.pdf",
+  # width = 3,
+  # height = 3)
+
+ggplot(data=df4b, aes(df4b$responsible)) +
+  geom_histogram(aes(),
+                 alpha=.5,
+                 bins = 7,
+                 position = 'stack', 
+                 stat = 'bin',
+                 color="black",
+                 fill="grey")+
+  theme_classic()+
+  xlab("personal responsibility")+ scale_x_continuous(breaks=seq(1,7,1))
+#save output
+ # dev.off()
+```
